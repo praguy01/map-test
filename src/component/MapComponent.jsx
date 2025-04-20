@@ -145,7 +145,7 @@ function MapDashboard() {
       "ร้อนปานกลาง": 0,
       "ปกติ": 0,
     };
-    
+  
     filteredFeatures.forEach((feature) => {
       const brightness =
         feature.properties.brightness ??
@@ -153,118 +153,124 @@ function MapDashboard() {
         feature.properties.bright_ti4 ??
         feature.properties.bright_ti5 ??
         0;
-    
+  
       if (brightness > 320) summary["ร้อนมาก"]++;
       else if (brightness > 310) summary["ร้อนสูง"]++;
       else if (brightness >= 295) summary["ร้อนปานกลาง"]++;
       else summary["ปกติ"]++;
     });
-    
-    setHeatSummary(summary); // set ค่าเข้า state
-    
+  
+    setHeatSummary(summary);
+  
     const geojson = getHeatmapGeoJSON(filteredFeatures);
   
-    if (mapRef.current.getSource("heat")) {
-      mapRef.current.getSource("heat").setData(geojson);
-    } else {
-      mapRef.current.addSource("heat", {
-        type: "geojson",
-        data: geojson,
-      });
-  
-      //  Heatmap Layer
-      mapRef.current.addLayer({
-        id: "heatmap-layer",
-        type: "heatmap",
-        source: "heat",
-        maxzoom: 15,
-        paint: {
-          "heatmap-weight": [
-            "interpolate",
-            ["linear"],
-            ["get", "intensity"],
-            0, 0,
-            100, 1,
-          ],
-          "heatmap-intensity": 1.2,
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0, "rgba(33,102,172,0)",
-            0.2, "rgb(103,169,207)",
-            0.4, "rgb(209,229,240)",
-            0.6, "rgb(253,219,199)",
-            0.8, "rgb(239,138,98)",
-            1, "rgb(178,24,43)"
-          ],
-          "heatmap-radius": 20,
-          "heatmap-opacity": 0.8,
-        },
-      });
-  
-      //  Circle layer (โปร่งใสไว้คลิก)
-      mapRef.current.addLayer({
-        id: "heatmap-point-layer",
-        type: "circle",
-        source: "heat",
-        minzoom: 5,
-        paint: {
-          "circle-radius": 6,
-          "circle-color": "#fff",
-          "circle-opacity": 0.01, // มองไม่เห็น แต่คลิกได้
-        },
-      });
-  
-      // Popup เมื่อคลิกจุด
-      mapRef.current.on("click", "heatmap-point-layer", (e) => {
-        const coords = e.features[0].geometry.coordinates.slice();
-        const props = e.features[0].properties;
-      
-        const dateStr = props.th_date;
-        const timeStr = props.th_time;
-        let formattedDate = "-";
-      
-        if (dateStr && timeStr?.length === 4) {
-          const dateTime = new Date(`${dateStr}T${timeStr.slice(0, 2)}:${timeStr.slice(2)}:00`);
-          formattedDate = new Intl.DateTimeFormat("th-TH", {
-            dateStyle: "long",
-            timeStyle: "short",
-          }).format(dateTime);
-        }
-      
-        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
-          <div style="font-size: 14px; line-height: 1.5;">
-            <strong></strong> ${formattedDate}<br/>
-            <strong>🛰️ ดาวเทียม:</strong> ${props.satellite || "-"}<br/>
-            <strong>🔥 ความร้อน:</strong> ${props.intensity || "-"}<br/>
-            <strong>📍 ลองจิจูด:</strong> ${coords[0].toFixed(4)}
-          </div>
-        `);
-      
-        popup.setLngLat(coords).addTo(mapRef.current);
-      });
-    }
-  
-    //  Fit map to bounds
-    const bounds = new maplibregl.LngLatBounds();
-    filteredFeatures.forEach((f) => {
-      const coords = f.geometry?.coordinates;
-      if (coords) bounds.extend(coords);
-    });
-  
-    if (!bounds.isEmpty()) {
-      const featureCount = filteredFeatures.length;
-    
-      if (featureCount === 1) {
-        const coords = filteredFeatures[0].geometry.coordinates;
-        mapRef.current.setCenter(coords);
-        mapRef.current.setZoom(6); 
+    const updateMap = () => {
+      if (mapRef.current.getSource("heat")) {
+        mapRef.current.getSource("heat").setData(geojson);
       } else {
-        mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 8 }); // จำกัดไม่ให้ zoom ใกล้เกิน
+        mapRef.current.addSource("heat", {
+          type: "geojson",
+          data: geojson,
+        });
+  
+        mapRef.current.addLayer({
+          id: "heatmap-layer",
+          type: "heatmap",
+          source: "heat",
+          maxzoom: 15,
+          paint: {
+            "heatmap-weight": [
+              "interpolate",
+              ["linear"],
+              ["get", "intensity"],
+              0, 0,
+              100, 1,
+            ],
+            "heatmap-intensity": 1.2,
+            "heatmap-color": [
+              "interpolate",
+              ["linear"],
+              ["heatmap-density"],
+              0, "rgba(33,102,172,0)",
+              0.2, "rgb(103,169,207)",
+              0.4, "rgb(209,229,240)",
+              0.6, "rgb(253,219,199)",
+              0.8, "rgb(239,138,98)",
+              1, "rgb(178,24,43)"
+            ],
+            "heatmap-radius": 20,
+            "heatmap-opacity": 0.8,
+          },
+        });
+  
+        mapRef.current.addLayer({
+          id: "heatmap-point-layer",
+          type: "circle",
+          source: "heat",
+          minzoom: 5,
+          paint: {
+            "circle-radius": 6,
+            "circle-color": "#fff",
+            "circle-opacity": 0.01,
+          },
+        });
+  
+        mapRef.current.on("click", "heatmap-point-layer", (e) => {
+          const coords = e.features[0].geometry.coordinates.slice();
+          const props = e.features[0].properties;
+  
+          const dateStr = props.th_date;
+          const timeStr = props.th_time;
+          let formattedDate = "-";
+  
+          if (dateStr && timeStr?.length === 4) {
+            const dateTime = new Date(`${dateStr}T${timeStr.slice(0, 2)}:${timeStr.slice(2)}:00`);
+            formattedDate = new Intl.DateTimeFormat("th-TH", {
+              dateStyle: "long",
+              timeStyle: "short",
+            }).format(dateTime);
+          }
+  
+          const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
+            <div style="font-size: 14px; line-height: 1.5;">
+              <strong></strong> ${formattedDate}<br/>
+              <strong>🛰️ ดาวเทียม:</strong> ${props.satellite || "-"}<br/>
+              <strong>🔥 ความร้อน:</strong> ${props.intensity || "-"}<br/>
+              <strong>📍 ลองจิจูด:</strong> ${coords[0].toFixed(4)}
+            </div>
+          `);
+  
+          popup.setLngLat(coords).addTo(mapRef.current);
+        });
       }
+  
+      // Zoom map
+      const bounds = new maplibregl.LngLatBounds();
+      filteredFeatures.forEach((f) => {
+        const coords = f.geometry?.coordinates;
+        if (coords) bounds.extend(coords);
+      });
+  
+      if (!bounds.isEmpty()) {
+        const featureCount = filteredFeatures.length;
+  
+        if (featureCount === 1) {
+          const coords = filteredFeatures[0].geometry.coordinates;
+          mapRef.current.setCenter(coords);
+          mapRef.current.setZoom(6);
+        } else {
+          mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 8 });
+        }
+      }
+    };
+  
+    if (mapRef.current.isStyleLoaded()) {
+      updateMap();
+    } else {
+      mapRef.current.once("load", updateMap);
     }
   }, [features, isDayMode]);
+  
   
   
 
@@ -448,30 +454,30 @@ function MapDashboard() {
         </nav>
       </div>
 
-      {/* --- Main Content --- */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="bg-white shadow px-6 py-4 text-2xl font-semibold border-b flex items-center justify-between">
-  <div className="flex items-center gap-2">
-    {/* ปุ่มแฮมเบอร์เกอร์บนมือถือ */}
-    <button
-      className="md:hidden text-2xl"
-      onClick={() => setIsSidebarOpen(true)}
-    >
-      <FiMenu />
-    </button>
+            {/* --- Main Content --- */}
+            <div className="flex-1 flex flex-col">
+              {/* Header */}
+              <header className="bg-white shadow px-6 py-4 text-2xl font-semibold border-b flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {/* ปุ่มแฮมเบอร์เกอร์บนมือถือ */}
+          <button
+            className="md:hidden text-2xl"
+            onClick={() => setIsSidebarOpen(true)}
+          >
+            <FiMenu />
+          </button>
 
-    {/* Breadcrumb + ไอคอน */}
-    <div className="flex items-center gap-3 text-gray-600 text-sm md:text-base">
-      <FiMapPin className="text-xl text-gray-800" />
-      <span>แผนที่</span>
-      <span className="mx-1">/</span>
-      <span className="text-gray-800 font-semibold">
-        จุดความร้อน (7 ม.ค. 2567)
-      </span>
-    </div>
-  </div>
-</header>
+          {/* Breadcrumb + ไอคอน */}
+          <div className="flex items-center gap-3 text-gray-600 text-sm md:text-base">
+            <FiMapPin className="text-xl text-gray-800" />
+            <span>แผนที่</span>
+            <span className="mx-1">/</span>
+            <span className="text-gray-800 font-semibold">
+              จุดความร้อน (7 ม.ค. 2567)
+            </span>
+          </div>
+        </div>
+      </header>
 
 
         <main className="flex flex-col md:flex-row flex-1 relative">
@@ -507,63 +513,63 @@ function MapDashboard() {
               </div>
             </div>
 
-      {/* กล่อง 2: สรุประดับความร้อน */}
-      <div className="bg-neutral-100 rounded-2xl shadow transition-transform hover:-translate-y-1 hover:shadow-xl">
-        {/* หัวกล่อง */}
-        <div className="bg-black/60 text-white text-lg font-semibold px-6 py-3 rounded-t-2xl">
-        <div className="flex items-center gap-2">
-            <FiPieChart className="text-white" />
-            <span>สรุประดับความร้อน</span>
-          </div>
-        </div>
+                {/* กล่อง 2: สรุประดับความร้อน */}
+                <div className="bg-neutral-100 rounded-2xl shadow transition-transform hover:-translate-y-1 hover:shadow-xl">
+                  {/* หัวกล่อง */}
+                  <div className="bg-black/60 text-white text-lg font-semibold px-6 py-3 rounded-t-2xl">
+                  <div className="flex items-center gap-2">
+                      <FiPieChart className="text-white" />
+                      <span>สรุประดับความร้อน</span>
+                    </div>
+                  </div>
 
-      {/* เนื้อหากล่อง */}
-      <div className="p-6">
-        <div className="flex flex-col md:flex-row items-center gap-4">
-          {/* PieChart ซ้าย */}
-          <div className="w-full md:w-1/2 h-48 flex items-center justify-center">
-            {pieData.length > 0 && pieData.some((d) => d.value > 0) ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-              <Pie
-                data={pieData}
-                dataKey="value"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                outerRadius={60}
-                innerRadius={30}
-              >
-                {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="text-gray-500 text-sm">ไม่มีข้อมูลความร้อน</div>
-        )}
-      </div>
+                {/* เนื้อหากล่อง */}
+                <div className="p-6">
+                  <div className="flex flex-col md:flex-row items-center gap-4">
+                    {/* PieChart ซ้าย */}
+                    <div className="w-full md:w-1/2 h-48 flex items-center justify-center">
+                      {pieData.length > 0 && pieData.some((d) => d.value > 0) ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                        <Pie
+                          data={pieData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={60}
+                          innerRadius={30}
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="text-gray-500 text-sm">ไม่มีข้อมูลความร้อน</div>
+                  )}
+                </div>
 
-      {/* รายการระดับความร้อน */}
-      <div className="w-full md:w-1/2 space-y-2 text-sm text-gray-800">
-        {Object.entries(heatSummary).map(([label, count]) => (
-          <div key={label} className="flex justify-between items-center">
-            <span className="flex items-center">
-            <span
-                  className="w-3 h-3 mr-2 rounded-full ring-2 ring-white"
-                  style={{ backgroundColor: colorMap[label] }}
-                />
-              {label}
-            </span>
-            <span>{count} จุด</span>
+                {/* รายการระดับความร้อน */}
+                <div className="w-full md:w-1/2 space-y-2 text-sm text-gray-800">
+                  {Object.entries(heatSummary).map(([label, count]) => (
+                    <div key={label} className="flex justify-between items-center">
+                      <span className="flex items-center">
+                      <span
+                            className="w-3 h-3 mr-2 rounded-full ring-2 ring-white"
+                            style={{ backgroundColor: colorMap[label] }}
+                          />
+                        {label}
+                      </span>
+                      <span>{count} จุด</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
-        ))}
-      </div>
-    </div>
-  </div>
-</div>
           </aside>
         </main>
       </div>
