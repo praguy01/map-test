@@ -442,26 +442,46 @@ function MapDashboard() {
   };
   
   useEffect(() => {
-    if (isSidebarOpen) {
+    const isMobile = window.innerWidth < 768;
+  
+    if (isSidebarOpen && isMobile) {
       document.body.style.overflow = 'hidden';
-      document.documentElement.style.overflow = 'hidden'; // สำหรับ <html>
-      document.body.style.position = 'fixed'; // กันเด้ง
-      document.body.style.width = '100%';     // ให้จอไม่เลื่อนด้านข้าง
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
+      document.documentElement.style.touchAction = 'none';
     } else {
       document.body.style.overflow = '';
       document.documentElement.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.width = '';
+      document.body.style.touchAction = '';
+      document.documentElement.style.touchAction = '';
     }
   
+    const handleResize = () => {
+      const isMobileNow = window.innerWidth < 768;
+      if (isSidebarOpen && isMobileNow) {
+        document.body.style.overflow = 'hidden';
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.touchAction = 'none';
+        document.documentElement.style.touchAction = 'none';
+      } else {
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+        document.body.style.touchAction = '';
+        document.documentElement.style.touchAction = '';
+      }
+    };
+  
+    window.addEventListener("resize", handleResize);
+  
     return () => {
-      // cleanup
       document.body.style.overflow = '';
       document.documentElement.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.width = '';
+      document.body.style.touchAction = '';
+      document.documentElement.style.touchAction = '';
+      window.removeEventListener("resize", handleResize);
     };
   }, [isSidebarOpen]);
+  
   
   
   
