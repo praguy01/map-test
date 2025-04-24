@@ -5,6 +5,8 @@ import {MdSatelliteAlt,MdCropRotate,MdAccessTimeFilled} from "react-icons/md";
 import {FaChevronRight,FaChevronLeft} from "react-icons/fa";
 import {FiChevronLeft,FiChevronRight,FiChevronDown,FiMenu,FiMapPin,FiGlobe ,FiPieChart} from "react-icons/fi";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 function MapDashboard() {
   const mapContainer = useRef(null);
@@ -17,26 +19,47 @@ function MapDashboard() {
   const [markers, setMarkers] = useState([]);
   const [allFeatures, setAllFeatures] = useState([]);
   const [timePeriod, setTimePeriod] = useState("");
+  const [selectedDate, setSelectedDate] = useState("2024-01-07"); // ใช้เพื่อเก็บวันที่ที่เลือก
+  const [isLoading, setIsLoading] = useState(true); // ใช้สำหรับแสดง Loader
+  const hasZoomedRef = useRef(false);
+  const [currentFilterType, setCurrentFilterType] = useState("all");
+  const [isDataReady, setIsDataReady] = useState(false);
+
 
 
   const filterFeatures = (type) => {
+    if (!allFeatures.length) return;
+  
+    let filtered = [...allFeatures];
+  
+    // กรองตามวันที่
+    if (selectedDate) {
+      filtered = filtered.filter((f) => f.properties?.th_date === selectedDate);
+    }
+  
+    // กรองตามช่วงเวลา
+    filtered = filterByTime(filtered, isDayMode);
+  
+    // กรองตามประเภทดาวเทียม
     switch (type) {
-      case "all":
-        setFeatures(allFeatures);
-        break;
       case "modis":
-        setFeatures(allFeatures.filter((f) => f.properties.bright_t31 !== null));
+        filtered = filtered.filter((f) => f.properties.bright_t31 !== null);
         break;
       case "viirs_ti4":
-        setFeatures(allFeatures.filter((f) => f.properties.bright_ti4 !== null));
+        filtered = filtered.filter((f) => f.properties.bright_ti4 !== null);
         break;
       case "viirs_ti5":
-        setFeatures(allFeatures.filter((f) => f.properties.bright_ti5 !== null));
+        filtered = filtered.filter((f) => f.properties.bright_ti5 !== null);
         break;
+      case "all":
       default:
-        setFeatures(allFeatures);
+        // ไม่ต้องกรองเพิ่ม
+        break;
     }
-  };  
+  
+    setFeatures(filtered);
+  };
+  
 
   const filterByTime = (features, isDayMode) => {
     return features.filter((f) => {
@@ -46,19 +69,40 @@ function MapDashboard() {
       return isDayMode ? hour >= 6 && hour < 18 : hour < 6 || hour >= 18;
     });
   };
+
+  useEffect(() => {
+    hasZoomedRef.current = false;
+  }, [selectedDate]);
+
+
+  useEffect(() => {
+    if (isDataReady) {
+      filterFeatures(currentFilterType);
+    }
+  }, [selectedDate, isDayMode, currentFilterType, isDataReady]);
+  
+
+  const handleFilter = (type) => {
+    setCurrentFilterType(type);
+    if (isDataReady) {
+      filterFeatures(type);
+    }
+  };
+  
+
   
   const [heatSummary, setHeatSummary] = useState({
-    "ร้อนมาก": 0,
-    "ร้อนสูง": 0,
-    "ร้อนปานกลาง": 0,
-    "ปกติ": 0,
+    "> 320": 0,
+    "> 310": 0,
+    ">= 295": 0,
+    "< 294": 0,
   });
 
   const colorMap = {
-    "ร้อนมาก": "#ef4444",      // red-500
-    "ร้อนสูง": "#fb923c",      // orange-400
-    "ร้อนปานกลาง": "#fde047", // yellow-300
-    "ปกติ": "#d1d5db",         // gray-300
+    "> 320": "#ef4444",      // red-500
+    "> 310": "#fb923c",      // orange-400
+    ">= 295": "#fde047", // yellow-300
+    "< 294": "#d1d5db",         // gray-300
   };
 
   const pieData = Object.entries(heatSummary).map(([label, count]) => ({
@@ -66,6 +110,8 @@ function MapDashboard() {
     value: count,
     color: colorMap[label],
   }));
+
+  
   
   const getHeatmapGeoJSON = (features) => ({
     type: "FeatureCollection",
@@ -79,6 +125,8 @@ function MapDashboard() {
         },
         properties: {
           intensity:
+            f.properties.bt_i4_k_ ??
+            f.properties.bt_i5_k_ ??
             f.properties?.bright_t31 ??
             f.properties?.bright_ti4 ??
             f.properties?.bright_ti5 ??
@@ -86,37 +134,72 @@ function MapDashboard() {
           satellite: f.properties?.satellite || null,
           th_date: f.properties?.th_date || null,
           th_time: f.properties?.th_time || null,
+          ct_en: f.properties?.ct_en || null,
+          amphoe: f.properties?.amphoe || null,
+          changwat: f.properties?.changwat || null,
+          tambol: f.properties?.tambol || null,
+          village: f.properties?.village || null,
+          lu_hp_name: f.properties?.lu_hp_name || null,
+          lu_name: f.properties?.lu_name || null,
         },
       })),
   });
-  
-  
 
+  
+  
+  const fetchAllFeatures = async (url, collected = [], onUpdate = () => {}, selectedDate = null) => {
+    const res = await fetch(url);
+    const data = await res.json();
+    const features = data.features || [];
+  
+    const nextLink = data.links?.find(l => l.rel === "next")?.href;
+  
+    const combined = [...collected, ...features];
+  
+    // กรองก่อนแสดง
+    if (selectedDate) {
+      const filtered = combined.filter(f => f.properties?.th_date === selectedDate);
+      onUpdate(filtered);
+    } else {
+      onUpdate(combined); // กรณีไม่กรอง
+    }
+  
+    if (nextLink) {
+      return fetchAllFeatures(nextLink, combined, onUpdate, selectedDate);
+    }
+  
+    return combined;
+  };
+  
 
   useEffect(() => {
-    const url =
-      "https://v2k-dev.vallarismaps.com/core/api/features/1.1/collections/658cd4f88a4811f10a47cea7/items?api_key=bLNytlxTHZINWGt1GIRQBUaIlqz9X45XykLD83UkzIoN6PFgqbH7M7EDbsdgKVwC";
-    fetch(url)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.features) {
-          console.log("ดึงข้อมูล features", data.features.length);
-          setAllFeatures(data.features); // ต้องเก็บลง allFeatures
-          setFeatures(data.features);
-
-          // ดึงเวลาจาก feature แรก
-        const timeString = data.features[0]?.properties?.th_time;
-        if (timeString) {
-          const hour = parseInt(timeString.slice(0, 2), 10);
-
-          // สมมติ กลางวันคือ 6:00 - 17:59
-          const isDay = hour >= 6 && hour < 18;
-          setTimePeriod(isDay ? "day" : "night");
-        }
-      }
+    let baseUrl = "https://v2k-dev.vallarismaps.com/core/api/features/1.1/collections/658cd4f88a4811f10a47cea7/items";
+    let params = new URLSearchParams({
+      limit: 10000,
+      api_key: "bLNytlxTHZINWGt1GIRQBUaIlqz9X45XykLD83UkzIoN6PFgqbH7M7EDbsdgKVwC"
     });
-  }, []);
-
+  
+    if (selectedDate) {
+      params.append("th_date", selectedDate); 
+    }
+  
+    const url = `${baseUrl}?${params.toString()}`;
+    console.log("Full URL:", url); //ดูว่า query ถูกต้องไหม
+  
+    setIsLoading(true);
+    setIsDataReady(false); // ก่อนโหลดใหม่
+  
+    fetchAllFeatures(url, [], (partialFiltered) => {
+      setFeatures(partialFiltered);
+    }, selectedDate).then((allData) => {
+      setAllFeatures(allData);
+      setIsLoading(false);
+      setIsDataReady(true); // ข้อมูลพร้อม
+    });
+  }, [selectedDate]);
+  
+  
+  
   useEffect(() => {
     if (!mapContainer.current) return;
 
@@ -138,31 +221,46 @@ function MapDashboard() {
   useEffect(() => {
     if (!mapRef.current || features.length === 0) return;
   
-    const filteredFeatures = filterByTime(features, isDayMode);
+    // กรองตามวันที่และช่วงเวลา (กลางวัน/กลางคืน)
+    const filteredFeatures = filterByTime(
+      features.filter((f) => f.properties?.th_date === selectedDate),
+      isDayMode
+    );
+  
     const summary = {
-      "ร้อนมาก": 0,
-      "ร้อนสูง": 0,
-      "ร้อนปานกลาง": 0,
-      "ปกติ": 0,
+      "> 320": 0,
+      "> 310": 0,
+      ">= 295": 0,
+      "< 294": 0,
     };
   
     filteredFeatures.forEach((feature) => {
-      const brightness =
-        feature.properties.brightness ??
-        feature.properties.bright_t31 ??
-        feature.properties.bright_ti4 ??
-        feature.properties.bright_ti5 ??
-        0;
+      const brightnessRaw =
+      feature.properties.bt_i4_k_ ??
+      feature.properties.bt_i5_k_ ??
+      feature.properties.brightness ??
+      feature.properties.bright_t31 ??
+      feature.properties.bright_ti4 ??
+      feature.properties.bright_ti5;
+    
+    const brightness = parseFloat(brightnessRaw) || 0;
+    feature.properties.intensity = brightness;
+    
+    //console.log("Brightness:", brightness, "From:", feature.properties);
+    
   
-      if (brightness > 320) summary["ร้อนมาก"]++;
-      else if (brightness > 310) summary["ร้อนสูง"]++;
-      else if (brightness >= 295) summary["ร้อนปานกลาง"]++;
-      else summary["ปกติ"]++;
+      if (brightness > 320) summary["> 320"]++;
+      else if (brightness > 310) summary["> 310"]++;
+      else if (brightness >= 295) summary[">= 295"]++;
+      else summary["< 294"]++;
     });
   
     setHeatSummary(summary);
-  
+
+    
     const geojson = getHeatmapGeoJSON(filteredFeatures);
+    //console.log("GEOJSON DATA", geojson);
+
   
     const updateMap = () => {
       if (mapRef.current.getSource("heat")) {
@@ -183,8 +281,8 @@ function MapDashboard() {
               "interpolate",
               ["linear"],
               ["get", "intensity"],
-              0, 0,
-              100, 1,
+              295, 0,
+              340, 1,
             ],
             "heatmap-intensity": 1.2,
             "heatmap-color": [
@@ -209,20 +307,20 @@ function MapDashboard() {
           source: "heat",
           minzoom: 5,
           paint: {
-            "circle-radius": 6,
-            "circle-color": "#fff",
-            "circle-opacity": 0.01,
+            "circle-radius": 8,  // เพิ่มขนาดจุด
+            "circle-color": "#ff0000",  // เปลี่ยนสีเป็นสีแดงเพื่อให้มองเห็นได้ชัด
+            "circle-opacity": 1,  // เพิ่มความทึบของจุด
           },
         });
   
-        mapRef.current.on("click", "heatmap-point-layer", (e) => {
+        mapRef.current.on("click", "heatmap-point-layer", async (e) => {
           const coords = e.features[0].geometry.coordinates.slice();
           const props = e.features[0].properties;
-  
+        
           const dateStr = props.th_date;
           const timeStr = props.th_time;
           let formattedDate = "-";
-  
+        
           if (dateStr && timeStr?.length === 4) {
             const dateTime = new Date(`${dateStr}T${timeStr.slice(0, 2)}:${timeStr.slice(2)}:00`);
             formattedDate = new Intl.DateTimeFormat("th-TH", {
@@ -230,48 +328,59 @@ function MapDashboard() {
               timeStyle: "short",
             }).format(dateTime);
           }
-  
+
+          const isThailand = props.ct_en === "Thailand";
+          console.log("Country check (props.ct_en):", isThailand);
+          const locationDetails = isThailand
+          
+            ? `
+                <strong>📌 จังหวัด:</strong> ${props.pv_tn || props.changwat || "-"}<br/>
+                <strong>🏞️ อำเภอ:</strong> ${props.ap_tn || props.amphoe || "-"}<br/>
+                <strong>🏘️ ตำบล:</strong> ${props.tb_tn || props.tambol || "-"}<br/>
+                <strong>🏘️ หมู่บ้าน:</strong> ${props.village  || "-"}<br/>
+                <strong>🌱 พืชที่ปลูก:</strong> ${props.lu_hp_name || "-"}<br/>
+                <strong>🏞️ ประเภทที่ดิน:</strong> ${props.lu_name || "-"}<br/>
+            `
+            : "";
+            console.log("Popup Location Details:", locationDetails);
+            console.log("Popup Properties:", props);
+
           const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
-            <div style="font-size: 14px; line-height: 1.5;">
+            <div style="font-size: 14px; line-height: 1.5; max-height: 150px; overflow-y: auto;">
               <strong></strong> ${formattedDate}<br/>
               <strong>🛰️ ดาวเทียม:</strong> ${props.satellite || "-"}<br/>
               <strong>🔥 ความร้อน:</strong> ${props.intensity || "-"}<br/>
-              <strong>📍 ลองจิจูด:</strong> ${coords[0].toFixed(4)}
+              <strong>📍 ลองจิจูด:</strong> ${coords[0].toFixed(4)}<br/>
+              <strong>📍 ละติจูด:</strong> ${coords[1].toFixed(4)}<br/>
+              ${locationDetails}
             </div>
           `);
-  
           popup.setLngLat(coords).addTo(mapRef.current);
         });
+        
       }
   
-      // Zoom map
+      // Zoom to bounds
+    if (!hasZoomedRef.current) {
       const bounds = new maplibregl.LngLatBounds();
       filteredFeatures.forEach((f) => {
         const coords = f.geometry?.coordinates;
         if (coords) bounds.extend(coords);
       });
-  
+
       if (!bounds.isEmpty()) {
-        const featureCount = filteredFeatures.length;
-  
-        if (featureCount === 1) {
-          const coords = filteredFeatures[0].geometry.coordinates;
-          mapRef.current.setCenter(coords);
-          mapRef.current.setZoom(6);
-        } else {
-          mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 8 });
-        }
+        mapRef.current.fitBounds(bounds, { padding: 40, maxZoom: 8 });
+        hasZoomedRef.current = true; // ซูมแค่ครั้งแรกเท่านั้น
       }
-    };
-  
-    if (mapRef.current.isStyleLoaded()) {
-      updateMap();
-    } else {
-      mapRef.current.once("load", updateMap);
     }
-  }, [features, isDayMode]);
-  
-  
+  };
+
+  if (mapRef.current.isStyleLoaded()) {
+    updateMap();
+  } else {
+    mapRef.current.once("load", updateMap);
+  }
+}, [features, isDayMode, selectedDate]);
   
 
   useEffect(() => {
@@ -289,17 +398,31 @@ function MapDashboard() {
     mapRef.current.rotateTo(bearing + 45, { duration: 1000 });
   };
 
-  const getFeatureCounts = () => {
-    // สมมติว่าใช้ 'ct_tn' (ชื่อประเทศในภาษาไทย) หรือ 'ct_en' (ชื่อประเทศในภาษาอังกฤษ)
-    const countryCounts = features.reduce((acc, feature) => {
-      const country = feature.properties?.ct_tn || feature.properties?.ct_en || "ไม่ระบุ"; // ใช้ ct_tn ถ้ามี, ถ้าไม่มีก็ใช้ ct_en
-      acc[country] = (acc[country] || 0) + 1;
-      return acc;
-    }, {});
+  const filteredFeatures = filterByTime(
+    features.filter((f) => f.properties?.th_date === selectedDate),
+    isDayMode
+  );
+
   
-    // แปลงเป็น array ของ [category, count] สำหรับการแสดงผล
-    return Object.entries(countryCounts);
+
+  const getFeatureCounts = () => {
+    const counts = {};
+    filteredFeatures.forEach((f) => {
+      const country = f.properties.ct_tn || "ไม่ทราบประเทศ";
+      counts[country] = (counts[country] || 0) + 1;
+    });
+    return Object.entries(counts);
   };
+  
+  const landTypeSummary = filteredFeatures.reduce((acc, feature) => {
+    const landType = feature.properties?.lu_name || "-";
+    acc[landType] = (acc[landType] || 0) + 1;
+    return acc;
+  }, {});
+  
+  
+  
+  
 
   const getHeatIntensityCounts = () => {
     // คำนวณความถี่ของแต่ละช่วงความร้อน
@@ -321,10 +444,10 @@ function MapDashboard() {
   
 
   return (
-    <div className="flex h-screen overflow-hidden overflow-y-auto">
+    <div className="relative h-screen w-screen flex">
       {/* --- Sidebar --- */}
       <div
-          className={`fixed md:static top-0 left-0 h-full bg-black/85 text-white flex flex-col z-40 transition-all duration-300 ease-in-out
+          className={`fixed top-0 left-0 h-screen bg-black/85 text-white flex flex-col z-40 transition-all duration-300 ease-in-out
           ${isSidebarOpen ? "w-60" : "w-0 md:w-24"} md:flex overflow-hidden rounded-r-3xl `}
       >
         <div className="flex items-center justify-between p-5">
@@ -343,6 +466,71 @@ function MapDashboard() {
         </div>
 
         <nav className="space-y-4 px-3">
+         {/* --- Time --- */}
+         <div className="relative group">
+            <div
+              className="flex items-center px-3 py-2 rounded cursor-pointer transition hover:bg-gray-800"
+              onClick={() => {
+                if (!isSidebarOpen) {
+                  setIsSidebarOpen(true); // เปิด Sidebar ก่อน
+                } else {
+                  setIsSubMenutimeOpen(!isSubMenutimeOpen); //toggle submenu เฉพาะตอนเปิดอยู่แล้ว
+                }
+              }}
+            >
+              <MdAccessTimeFilled className="text-3xl" />
+              {isSidebarOpen && (
+                <>
+                  <span className="ml-2 flex-1 text-lg">Date</span>
+                  <span>
+                    {isSubMenutimeOpen ? <FiChevronDown /> : <FiChevronRight />}
+                  </span>
+                </>
+              )}
+            </div>
+            {!isSidebarOpen && (
+              <div className="absolute left-24 top-2 opacity-0 group-hover:opacity-100 transition-opacity text-sm bg-black text-white px-2 py-1 rounded-md shadow-lg whitespace-nowrap z-40">
+                Time
+              </div>
+            )}
+              {isSubMenutimeOpen && isSidebarOpen && (
+                <div className="ml-8 mt-1 space-y-2 text-sm">
+                  {/* เลือกวันที่ */}
+                  <div>
+                    <label htmlFor="date-picker" className="block mb-1 text-gray-300">เลือกวันที่</label>
+                    <input
+                        type="date"
+                        id="date-picker"
+                        className="bg-gray-800 text-white px-2 py-1 rounded w-full"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        min="2024-01-07"
+                        max="2024-01-25"
+                      />
+
+                </div>
+
+                {/* เลือกช่วงเวลา */}
+                {selectedDate && (
+                  <div className="space-y-1">
+                    <button
+                      className={`block w-full text-left text-base px-2 py-2 rounded hover:bg-gray-800 ${isDayMode ? "bg-gray-700" : ""}`}
+                      onClick={() => setIsDayMode(true)}
+                    >
+                      กลางวัน (06:00 - 18:00)
+                    </button>
+                    <button
+                      className={`block w-full text-left text-base px-2 py-2 rounded hover:bg-gray-800 ${!isDayMode ? "bg-gray-700" : ""}`}
+                      onClick={() => setIsDayMode(false)}
+                    >
+                      กลางคืน (18:00 - 06:00)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* --- Satellite --- */}
           <div className="relative group">
             <div
@@ -372,7 +560,7 @@ function MapDashboard() {
                   All
                 </button>
                 <button className="block w-full text-left text-base px-2 py-2 rounded hover:bg-gray-800"
-                onClick={() => filterFeatures("modis")}>
+                onClick={() => handleFilter("modis")}>
                   MODIS (bright_t31)
                 </button>
                 <button className="block w-full text-left text-base px-2 py-2 rounded hover:bg-gray-800"
@@ -387,54 +575,6 @@ function MapDashboard() {
             )}
           </div>
 
-          {/* --- Time --- */}
-          <div className="relative group">
-            <div
-              className="flex items-center px-3 py-2 rounded cursor-pointer transition hover:bg-gray-800"
-              onClick={() => {
-                if (!isSidebarOpen) {
-                  setIsSidebarOpen(true); // เปิด Sidebar ก่อน
-                } else {
-                  setIsSubMenutimeOpen(!isSubMenutimeOpen); //toggle submenu เฉพาะตอนเปิดอยู่แล้ว
-                }
-              }}
-            >
-              <MdAccessTimeFilled className="text-3xl" />
-              {isSidebarOpen && (
-                <>
-                  <span className="ml-2 flex-1 text-lg">Time</span>
-                  <span>
-                    {isSubMenutimeOpen ? <FiChevronDown /> : <FiChevronRight />}
-                  </span>
-                </>
-              )}
-            </div>
-            {!isSidebarOpen && (
-              <div className="absolute left-24 top-2 opacity-0 group-hover:opacity-100 transition-opacity text-sm bg-black text-white px-2 py-1 rounded-md shadow-lg whitespace-nowrap z-40">
-                Time
-              </div>
-            )}
-            {isSubMenutimeOpen && isSidebarOpen && (
-              <label className="relative inline-block w-14 h-8 left-10 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isDayMode}
-                  onChange={() => setIsDayMode(!isDayMode)}
-                  className="sr-only peer"
-                />
-                <div className="w-full h-full bg-gray-300 rounded-full peer-checked:bg-white transition-colors duration-300" />
-                <div
-                  className="absolute top-0.5 left-0.5 w-7 h-7 bg-white rounded-full shadow-md flex items-center justify-center text-lg transition-transform duration-300 peer-checked:translate-x-6"
-                >
-                  {isDayMode ? "☀️" : "🌙"}
-                </div>
-                {/* แสดงข้อความใต้ toggle */}
-                <p className="text-base mt-2 text-white">
-                  {isDayMode ? "กลางวัน" : "กลางคืน"}
-                </p>
-              </label>
-            )}
-          </div>
 
 
           {/* --- Rotate --- */}
@@ -467,14 +607,15 @@ function MapDashboard() {
             <FiMenu />
           </button>
 
-          {/* Breadcrumb + ไอคอน */}
-          <div className="flex items-center gap-3 text-gray-600 text-sm md:text-base">
-            <FiMapPin className="text-xl text-gray-800" />
-            <span>แผนที่</span>
-            <span className="mx-1">/</span>
-            <span className="text-gray-800 font-semibold">
-              จุดความร้อน (7 ม.ค. 2567)
-            </span>
+          <div className={`p-1 transition-all duration-300 ${isSidebarOpen ? "ml-60 md:ml-60" : "ml-0 md:ml-24"}`}
+          >
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-2 text-gray-600 text-sm md:text-base">
+              <FiMapPin className="text-xl text-gray-800" />
+              <span>แผนที่</span>
+              <span className="mx-1">/</span>
+              <span className="text-gray-800 font-semibold">จุดความร้อน (ม.ค 67)</span>
+            </div>
           </div>
         </div>
       </header>
@@ -484,7 +625,7 @@ function MapDashboard() {
           {/* แผนที่ฝั่งซ้าย */}
           <div
             ref={mapContainer}
-            className="flex-1 min-h-[320px] bg-gray-100 relative"
+            className="flex-1 min-h-[300px] bg-gray-100 relative"
           />
 
           {/* Sidebar ขวา */}
@@ -498,19 +639,48 @@ function MapDashboard() {
               </div>
               </div>
               <div className="p-6">
-                <div className="space-y-2">
-                  {getFeatureCounts().map(([country, count]) => (
-                    <div key={country} className="flex justify-between text-sm">
-                      <span>{country}</span>
-                      <span>{count} จุด</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-4 flex justify-between font-medium text-sm border-t pt-3">
-                  <span>รวม</span>
-                  <span>{features.length} จุด</span>
-                </div>
+            {isLoading ? (
+              <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
+                <svg
+                  className="animate-spin h-4 w-4 text-gray-500"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v8z"
+                  ></path>
+                </svg>
+                กำลังโหลดข้อมูล...
               </div>
+            ) : (
+              <>
+      <div className="space-y-2">
+        {getFeatureCounts().map(([country, count]) => (
+          <div key={country} className="flex justify-between text-sm">
+            <span>{country}</span>
+            <span>{count} จุด</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex justify-between font-medium text-sm border-t pt-3">
+        <span>รวม</span>
+        <span>{filteredFeatures.length} จุด</span>
+      </div>
+    </>
+  )}
+</div>
+
             </div>
 
                 {/* กล่อง 2: สรุประดับความร้อน */}
@@ -568,7 +738,26 @@ function MapDashboard() {
                   ))}
                 </div>
               </div>
+              {/* รายการประเภทที่ดินแนวนอน 2 คอลัมน์ */}
+              <div className="w-full space-y-2 text-sm text-gray-800">
+                <h4 className="text-base font-semibold text-gray-700 mb-2">ประเภทที่ดิน</h4>
+                <div className="grid grid-cols-2 gap-3 ">
+                  {Object.entries(landTypeSummary)
+                    .filter(([type]) => type.trim() !== "-" && type.trim() !== "")
+                    .map(([type, count]) => (
+                      <div
+                        key={type}
+                        className="px-4 py-2 bg-neutral-200 rounded-full shadow transition-transform hover:-translate-y-1 text-sm font-medium flex justify-between items-center"
+                      >
+                        <span>{type}</span>
+                        <span className="text-gray-500">{count} จุด</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
             </div>
+            
           </div>
           </aside>
         </main>
