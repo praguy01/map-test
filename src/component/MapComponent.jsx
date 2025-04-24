@@ -441,6 +441,30 @@ function MapDashboard() {
     return Object.entries(intensityCounts);
   };
   
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden'; // สำหรับ <html>
+      document.body.style.position = 'fixed'; // กันเด้ง
+      document.body.style.width = '100%';     // ให้จอไม่เลื่อนด้านข้าง
+    } else {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    }
+  
+    return () => {
+      // cleanup
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, [isSidebarOpen]);
+  
+  
+  
   
 
   return (
@@ -601,7 +625,7 @@ function MapDashboard() {
         <div className="flex items-center gap-2">
           {/* ปุ่มแฮมเบอร์เกอร์บนมือถือ */}
           <button
-            className="md:hidden text-2xl"
+            className="md:hidden text-2xl "
             onClick={() => setIsSidebarOpen(true)}
           >
             <FiMenu />
@@ -665,21 +689,21 @@ function MapDashboard() {
               </div>
             ) : (
               <>
-      <div className="space-y-2">
-        {getFeatureCounts().map(([country, count]) => (
-          <div key={country} className="flex justify-between text-sm">
-            <span>{country}</span>
-            <span>{count} จุด</span>
+                <div className="space-y-2">
+                  {getFeatureCounts().map(([country, count]) => (
+                    <div key={country} className="flex justify-between text-sm">
+                      <span>{country}</span>
+                      <span>{count} จุด</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex justify-between font-medium text-sm border-t pt-3">
+                  <span>รวม</span>
+                  <span>{filteredFeatures.length} จุด</span>
+                </div>
+              </>
+            )}
           </div>
-        ))}
-      </div>
-      <div className="mt-4 flex justify-between font-medium text-sm border-t pt-3">
-        <span>รวม</span>
-        <span>{filteredFeatures.length} จุด</span>
-      </div>
-    </>
-  )}
-</div>
 
             </div>
 
